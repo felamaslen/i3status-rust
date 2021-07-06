@@ -3,6 +3,7 @@ pub mod backlight;
 pub mod base_block;
 pub mod battery;
 pub mod bluetooth;
+pub mod budget;
 pub mod cpu;
 pub mod custom;
 pub mod custom_dbus;
@@ -44,6 +45,7 @@ use self::backlight::*;
 use self::base_block::*;
 use self::battery::*;
 use self::bluetooth::*;
+use self::budget::*;
 use self::cpu::*;
 use self::custom::*;
 use self::custom_dbus::*;
@@ -224,6 +226,7 @@ pub fn create_block(
         "backlight" => block!(Backlight, id, block_config, shared_config, update_request),
         "battery" => block!(Battery, id, block_config, shared_config, update_request),
         "bluetooth" => block!(Bluetooth, id, block_config, shared_config, update_request),
+        "budget" => block!(Budget, id, block_config, shared_config, update_request),
         "cpu" => block!(Cpu, id, block_config, shared_config, update_request),
         "custom" => block!(Custom, id, block_config, shared_config, update_request),
         "custom_dbus" => block!(CustomDBus, id, block_config, shared_config, update_request),
