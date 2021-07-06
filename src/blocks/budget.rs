@@ -1,8 +1,10 @@
+use std::cmp;
 use std::collections::HashMap;
 use std::env;
 use std::time::Duration;
 
 use crossbeam_channel::Sender;
+use num_format::{Locale, ToFormattedString};
 use serde_derive::Deserialize;
 use serde_json::Value;
 
@@ -65,19 +67,147 @@ fn get_url_graphql(api_url: &str) -> String {
     return format!("{api_url}/graphql", api_url = api_url,);
 }
 
+pub struct FormatCurrencyOptions {
+    abbreviate: Option<bool>,
+    brackets: Option<bool>,
+    custom_precision: Option<u32>,
+    pence: Option<bool>,
+    symbol: Option<bool>,
+}
+
+fn currency_display_value(abs_value: f64, log: u32, pence: bool) -> f64 {
+    if log > 0 {
+        return abs_value / ((10_i32.pow(log * 3)) as f64);
+    }
+    if !pence {
+        return abs_value.floor();
+    }
+    return abs_value;
+}
+
+fn round_currency_value(
+    display_value: f64,
+    formatted_int: String,
+    precision: u32,
+    log: u32,
+    pence: bool,
+) -> String {
+    if log == 0 && !pence {
+        return formatted_int;
+    }
+    let remainder = display_value - display_value.floor();
+    return format!(
+        "{}{}",
+        formatted_int,
+        &format!("{:.1$}", remainder, precision as usize)[1..]
+    );
+}
+
+fn get_precision(abbreviate: bool, log: u32, custom_precision: Option<u32>) -> u32 {
+    if abbreviate && log == 0 {
+        return 2;
+    }
+    if let Some(precision) = custom_precision {
+        return precision;
+    }
+    if abbreviate {
+        return 0;
+    }
+    2
+}
+
+fn format_currency(value: i64, maybe_options: Option<FormatCurrencyOptions>) -> String {
+    let mut abbreviate: bool = false;
+    let mut brackets: bool = false;
+    let mut symbol: bool = true;
+    let mut pence: bool = true;
+    let mut custom_precision: Option<u32> = None;
+
+    if let Some(options) = maybe_options {
+        abbreviate = match options.abbreviate {
+            Some(v) => v,
+            None => false,
+        };
+        brackets = match options.brackets {
+            Some(v) => v,
+            None => false,
+        };
+        symbol = match options.symbol {
+            Some(v) => v,
+            None => true,
+        };
+        pence = match options.pence {
+            Some(v) => v,
+            None => true,
+        };
+        custom_precision = options.custom_precision;
+    }
+
+    let mut sign: String = "".to_owned();
+    if !brackets && value < 0 {
+        sign = "\u{2212}".to_owned();
+    }
+
+    let mut symbol_output: String = "".to_owned();
+    if symbol {
+        symbol_output = "£".to_owned();
+    }
+
+    let abs_value: f64 = (value.abs() as f64) / 100.0;
+
+    let abbreviations: [String; 4] = [
+        "k".to_string(),
+        "m".to_string(),
+        "bn".to_string(),
+        "tn".to_string(),
+    ];
+
+    let mut log: u32 = 0;
+    if abbreviate && value != 0 {
+        log = cmp::min((abs_value.log10() / 3.0).floor() as u32, 4);
+    }
+
+    let precision = get_precision(abbreviate, log, custom_precision);
+
+    let mut abbreviation = "".to_owned();
+    if log > 0 {
+        abbreviation = abbreviations[(log as usize) - 1].to_owned();
+    }
+
+    let display_value = currency_display_value(abs_value, log, pence);
+    let display_int: i64 = display_value.floor() as i64;
+
+    let formatted_int = display_int.to_formatted_string(&Locale::en);
+    let formatted = round_currency_value(display_value, formatted_int, precision, log, pence);
+
+    if brackets && value < 0 {
+        return format!("({}{}{})", symbol_output, formatted, abbreviation);
+    }
+
+    return format!("{}{}{}{}", sign, symbol_output, formatted, abbreviation);
+}
+
 fn format_stock_value(latest_value: i64, previous_value: i64) -> (String, State) {
-    let today_profit_loss: f64 = (latest_value - previous_value) as f64;
-    let latest_value_float: f64 = latest_value as f64;
+    let today_profit_loss: i64 = latest_value - previous_value;
 
     let text = format!(
-        "£{:.2} (£{:.2})",
-        latest_value_float / 100.0,
-        today_profit_loss / 100.0
+        "{} ; {}",
+        format_currency(latest_value, None),
+        format_currency(
+            today_profit_loss,
+            Some(FormatCurrencyOptions {
+                abbreviate: None,
+                brackets: Some(true),
+                custom_precision: None,
+                pence: None,
+                symbol: None,
+            })
+        ),
     );
 
     let mut state = State::Good;
 
-    if today_profit_loss < 0.0 {
+    if today_profit_loss < 0 {
         state = State::Warning;
     }
 
