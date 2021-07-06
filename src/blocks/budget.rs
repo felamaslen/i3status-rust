@@ -65,6 +65,25 @@ fn get_url_graphql(api_url: &str) -> String {
     return format!("{api_url}/graphql", api_url = api_url,);
 }
 
+fn format_stock_value(latest_value: i64, previous_value: i64) -> (String, State) {
+    let today_profit_loss: f64 = (latest_value - previous_value) as f64;
+    let latest_value_float: f64 = latest_value as f64;
+
+    let text = format!(
+        "£{:.2} (£{:.2})",
+        latest_value_float / 100.0,
+        today_profit_loss / 100.0
+    );
+
+    let mut state = State::Good;
+
+    if today_profit_loss < 0.0 {
+        state = State::Warning;
+    }
+
+    (text, state)
+}
+
 impl Budget {
     async fn login(&mut self, client: &Client) -> Result<String> {
         let api_url = self.api_url.as_ref().unwrap();
@@ -109,7 +128,7 @@ impl Budget {
         }
     }
 
-    async fn get_stock_value(&mut self, client: &Client, api_key: &str) -> Result<f64> {
+    async fn get_stock_value(&mut self, client: &Client, api_key: &str) -> Result<i64> {
         let api_url = self.api_url.as_ref().unwrap();
         let url_graphql = get_url_graphql(api_url);
 
@@ -120,6 +139,7 @@ impl Budget {
         query StockValue {
             stockValue {
                 latestValue
+                previousValue
             }
         }
         ",
@@ -139,23 +159,29 @@ impl Budget {
         match response {
             Ok(res) => match res.json::<Value>().await {
                 Ok(query_response) => {
-                    let stock_value = &query_response["data"]["stockValue"]["latestValue"].as_f64();
-                    if stock_value.is_none() {
+                    let latest_value =
+                        &query_response["data"]["stockValue"]["latestValue"].as_i64();
+                    let previous_value =
+                        &query_response["data"]["stockValue"]["previousValue"].as_i64();
+
+                    if latest_value.is_none() || previous_value.is_none() {
                         self.text.set_text("-".to_owned());
-                        self.text.set_state(State::Warning);
-                        return Ok(0.0);
+                        self.text.set_state(State::Critical);
+                        return Ok(0);
                     }
 
-                    self.text
-                        .set_text(format!("£{:.2}", stock_value.unwrap() / 100.0));
-                    self.text.set_state(State::Good);
+                    let (text, state) =
+                        format_stock_value(latest_value.unwrap(), previous_value.unwrap());
 
-                    Ok(stock_value.unwrap())
+                    self.text.set_text(text);
+                    self.text.set_state(state);
+
+                    Ok(latest_value.unwrap())
                 }
                 Err(e) => Err(BlockError("Budget".to_owned(), e.to_string())),
             },
             Err(e) => {
-                self.text.set_state(State::Warning);
+                self.text.set_state(State::Critical);
                 Err(BlockError(
                     "Budget".to_owned(),
                     format!("Error fetching: {}", e.to_string()),
