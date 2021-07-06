@@ -68,19 +68,24 @@ fn get_url_graphql(api_url: &str) -> String {
 }
 
 pub struct FormatCurrencyOptions {
-    abbreviate: Option<bool>,
-    brackets: Option<bool>,
+    abbreviate: bool,
+    brackets: bool,
     custom_precision: Option<u32>,
-    pence: Option<bool>,
-    symbol: Option<bool>,
+    pence: bool,
+    symbol: bool,
 }
 
-fn currency_display_value(abs_value: f64, log: u32, pence: bool) -> f64 {
+fn round(value: f64, precision: u32) -> f64 {
+    let exp = 10_i64.pow(precision) as f64;
+    return (value * exp).round() / exp;
+}
+
+fn currency_display_value(abs_value: f64, log: u32, pence: bool, precision: u32) -> f64 {
     if log > 0 {
-        return abs_value / ((10_i32.pow(log * 3)) as f64);
+        return round(abs_value / ((10_i64.pow(log * 3)) as f64), precision);
     }
     if !pence {
-        return abs_value.floor();
+        return abs_value.round();
     }
     return abs_value;
 }
@@ -116,30 +121,18 @@ fn get_precision(abbreviate: bool, log: u32, custom_precision: Option<u32>) -> u
     2
 }
 
-fn format_currency(value: i64, maybe_options: Option<FormatCurrencyOptions>) -> String {
+fn format_currency(value: i64, maybe_options: &Option<FormatCurrencyOptions>) -> String {
     let mut abbreviate: bool = false;
     let mut brackets: bool = false;
     let mut symbol: bool = true;
     let mut pence: bool = true;
     let mut custom_precision: Option<u32> = None;
 
-    if let Some(options) = maybe_options {
-        abbreviate = match options.abbreviate {
-            Some(v) => v,
-            None => false,
-        };
-        brackets = match options.brackets {
-            Some(v) => v,
-            None => false,
-        };
-        symbol = match options.symbol {
-            Some(v) => v,
-            None => true,
-        };
-        pence = match options.pence {
-            Some(v) => v,
-            None => true,
-        };
+    if let Some(options) = &maybe_options {
+        abbreviate = options.abbreviate;
+        brackets = options.brackets;
+        symbol = options.symbol;
+        pence = options.pence;
         custom_precision = options.custom_precision;
     }
 
@@ -174,7 +167,7 @@ fn format_currency(value: i64, maybe_options: Option<FormatCurrencyOptions>) -> 
         abbreviation = abbreviations[(log as usize) - 1].to_owned();
     }
 
-    let display_value = currency_display_value(abs_value, log, pence);
+    let display_value = currency_display_value(abs_value, log, pence, precision);
     let display_int: i64 = display_value.floor() as i64;
 
     let formatted_int = display_int.to_formatted_string(&Locale::en);
@@ -192,15 +185,24 @@ fn format_stock_value(latest_value: i64, previous_value: i64) -> (String, State)
 
     let text = format!(
         "{} ; {}",
-        format_currency(latest_value, None),
+        format_currency(
+            latest_value,
+            &Some(FormatCurrencyOptions {
+                abbreviate: true,
+                brackets: false,
+                custom_precision: Some(1),
+                pence: false,
+                symbol: true,
+            })
+        ),
         format_currency(
             today_profit_loss,
-            Some(FormatCurrencyOptions {
-                abbreviate: None,
-                brackets: Some(true),
+            &Some(FormatCurrencyOptions {
+                abbreviate: false,
+                brackets: true,
                 custom_precision: None,
-                pence: None,
-                symbol: None,
+                pence: true,
+                symbol: true,
             })
         ),
     );
@@ -365,5 +367,94 @@ impl Block for Budget {
 
     fn id(&self) -> usize {
         self.id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::blocks::budget::{format_currency, FormatCurrencyOptions};
+
+    #[test]
+    fn test_format_currency_gbx_with_comma() {
+        let format_options = None;
+
+        assert_eq!(format_currency(1, &format_options), "£0.01");
+        assert_eq!(format_currency(-1, &format_options), "\u{2212}£0.01");
+        assert_eq!(format_currency(145, &format_options), "£1.45");
+        assert_eq!(
+            format_currency(1823123919, &format_options),
+            "£18,231,239.19"
+        );
+    }
+
+    #[test]
+    fn test_format_currency_brackets() {
+        let format_options = Some(FormatCurrencyOptions {
+            abbreviate: false,
+            brackets: true,
+            custom_precision: None,
+            pence: true,
+            symbol: true,
+        });
+
+        assert_eq!(format_currency(-8123, &format_options), "(£81.23)");
+        assert_eq!(format_currency(192, &format_options), "£1.92");
+    }
+
+    #[test]
+    fn test_format_currency_symbol() {
+        let format_options = Some(FormatCurrencyOptions {
+            abbreviate: false,
+            brackets: false,
+            custom_precision: None,
+            pence: true,
+            symbol: false,
+        });
+
+        assert_eq!(format_currency(99123, &format_options), "991.23");
+    }
+
+    #[test]
+    fn test_format_currency_pence() {
+        let format_options = Some(FormatCurrencyOptions {
+            abbreviate: false,
+            brackets: false,
+            custom_precision: None,
+            pence: false,
+            symbol: true,
+        });
+
+        assert_eq!(format_currency(17493, &format_options), "£175");
+        assert_eq!(format_currency(17443, &format_options), "£174");
+    }
+
+    #[test]
+    fn test_format_currency_abbreviate() {
+        let format_options = Some(FormatCurrencyOptions {
+            abbreviate: true,
+            brackets: false,
+            custom_precision: None,
+            pence: true,
+            symbol: true,
+        });
+
+        assert_eq!(format_currency(1000, &format_options), "£10.00");
+        assert_eq!(format_currency(191233, &format_options), "£2k");
+        assert_eq!(format_currency(128633219, &format_options), "£1m");
+        assert_eq!(format_currency(7859128633219, &format_options), "£79bn");
+        assert_eq!(format_currency(981123199100139, &format_options), "£10tn");
+    }
+
+    #[test]
+    fn test_format_currency_abbreviate_precision() {
+        let format_options = Some(FormatCurrencyOptions {
+            abbreviate: true,
+            brackets: false,
+            custom_precision: Some(1),
+            pence: true,
+            symbol: true,
+        });
+
+        assert_eq!(format_currency(818231238, &format_options), "£8.2m");
     }
 }
