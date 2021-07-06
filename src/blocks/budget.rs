@@ -117,14 +117,13 @@ impl Budget {
         body_query.insert(
             "query",
             "
-        query StockPrices($codes: [String!]!) {
-            stockPrices(codes: $codes) {
+        query StockValue {
+            stockValue {
                 latestValue
             }
         }
         ",
         );
-        body_query.insert("variables", "{\"codes\":[\"SMT.L\",\"FCSS.L\",\"MNKS.L\",\"BNKR.L\",\"BGS.L\",\"CTY.L\",\"ATT.L\"]}");
 
         let mut headers = HeaderMap::new();
 
@@ -140,8 +139,7 @@ impl Budget {
         match response {
             Ok(res) => match res.json::<Value>().await {
                 Ok(query_response) => {
-                    let stock_value =
-                        &query_response["data"]["stockPrices"]["latestValue"].as_f64();
+                    let stock_value = &query_response["data"]["stockValue"]["latestValue"].as_f64();
                     if stock_value.is_none() {
                         self.text.set_text("-".to_owned());
                         self.text.set_state(State::Warning);
